@@ -12,8 +12,37 @@ import pylab as p
 import logging
 from scipy import integrate
 
+#%%
+def logistic(x, L=1, k=1, x0=0):
+    return L/(1+exp(-k*(x-x0)))
+
+def exp_decay(start, decay):    
+    res = (exp(-decay*x+decay)-1) / (exp(decay)-1) * (start-1) + 1
+    return res
 
 #%%
+def encounters(pop_pred, pop_prey, probability):
+    res = pop_prey * pop_pred * probability
+    return res
+
+def nutrition_encountered(prey_nu_value, encounters):
+    res = prey_nu_value * encounters
+
+def nutrition_used(nutrition_needed, nutrition_encountered):
+    res = min(nutrition_needed, nutrition_encountered)
+    return res
+
+def nutrition_used_fraction(nutrition_encountered, nutrition_used):
+    res = nutrition_used / nutrition_encountered
+    return res
+
+def satiety(nutrition_needed, nutrition_encountered):
+    if nutrition_encountered == 0:
+        res = 1.
+    else:
+        res = nutrition_encountered / nutrition_needed
+    return res
+
 def birthrate_small_pop_penalty(pop, threshold):
     '''
     penalty factor on a birthrate for small populations: inbreeding depression, allee effect
@@ -45,62 +74,32 @@ def birthrate_large_pop_penalty(pop, threshold, decay, floor):
     return res
 
 
-def birthrate_malnutrition_penalty(pop, nutrition, hunger):
-    '''
-    penalty factor on birthrate for malnutrition
-    @param pop: population size
-    @param nutrition: available total nutrition units
-    @param hunger: max. nutrition unit intake per individuum
-    @return factor between 0 and 1
-    '''
-    res = satiety(pop, nutrition, hunger)
+def birthrate_low_satiety_penalty(satiety, decay=10):
+    res = logistic(satiety, 1, decay, 0.5)
     return res
 
 
-def birthrate(pop, birthrate_max, nutrition, hunger,
+def birthrate(birthrate_max, pop, satiety, 
               smallpop_threshold, largepop_threshold, largepop_decay, largepop_floor):
     '''
     birthrate for a population under given circumstances of capacity and nutrition
     @return birthrate; 0 <= birthrate <= birthrate_max
     '''
     res = birthrate_max * \
-            birthrate_malnutrition_penalty(pop, nutrition, hunger) * \
+            birthrate_low_satiety_penalty(satiety) * \
             birthrate_small_pop_penalty(pop, smallpop_threshold) * \
             birthrate_large_pop_penalty(pop, largepop_threshold, largepop_decay, largepop_floor)
     return res
 
 
-def deathrate_malnutrition_penalty(pop, nutrition, hunger, decay, ceil):
-    res = ceil / (1. + (ceil-1.)*satiety(pop, nutrition, hunger/decay))
+def deathrate_low_satiety_penalty(satiety, decay=3, ceil=5):
+    res = exp_decay(ceil, decay)
     return res
 
 
-def deathrate(pop, deathrate_min, nutrition, hunger, decay, ceil):
-    res = deathrate_min * deathrate_malnutrition_penalty(pop, nutrition, hunger, decay, ceil)
+def deathrate(deathrate_min, satiety, decay, ceil):
+    res = deathrate_min * deathrate_low_satiety_penalty(satiety, decay, ceil)
     return res
-
-
-def satiety(pop, nutrition, hunger):
-    '''
-    satiety value of a population under given nutrition
-    @return satiety; 0 <= satiety <= 1
-    '''
-    if hunger == 0:
-        res = ones(shape(pop))
-    else:
-        res = tanh(nutrition / (pop * hunger))
-    return res
-
-
-def encounters(pred, prey, probability):
-    res = prey * pred * probability
-    return res
-
-
-def kills(pred, prey, probability, hunger):
-    res = satiety(pred, encounters(pred, prey, probability), hunger) * pred * hunger
-    return res
-
 
 #%%
 class Nutrition_Pool:
