@@ -4,8 +4,10 @@
 Created on Wed Sep 26 12:48:24 2018
 
 @author: rlm
-TODO
-- which effects in small and large population are effects of DENSITY rather than POPULATION?
+TODO Tests schreiben
+TODO kommentieren
+TODO iterativen Löser schreiben (nicht-infinitesimal)
+TODO which effects in small and large population are effects of DENSITY rather than POPULATION?
 """
 from numpy import *
 import pylab as p
@@ -14,10 +16,14 @@ from scipy import integrate
 
 #%%
 def logistic(x, L=1, k=1, x0=0):
-    return L/(1+exp(-k*(x-x0)))
+    return L / (1 + exp(-k * (x-x0) ) )
 
 def exp_decay(start, decay):    
     res = (exp(-decay*x+decay)-1) / (exp(decay)-1) * (start-1) + 1
+    return res
+
+def tanh_decay(threshold, decay, floor):
+    res = 0.5 * (1+floor - (1-floor)*tanh(1/decay*(pop - threshold)))
     return res
 
 #%%
@@ -25,22 +31,23 @@ def encounters(pop_pred, pop_prey, probability):
     res = pop_prey * pop_pred * probability
     return res
 
-def nutrition_encountered(prey_nu_value, encounters):
-    res = prey_nu_value * encounters
-
-def nutrition_used(nutrition_needed, nutrition_encountered):
-    res = min(nutrition_needed, nutrition_encountered)
+def nu_encountered(pop_prey, prey_nu, encounters):
+    res = prey_nu * max(encounters, pop_prey)
     return res
 
-def nutrition_used_fraction(nutrition_encountered, nutrition_used):
-    res = nutrition_used / nutrition_encountered
+def nu_used(nu_needed, nu_encountered):
+    res = min(nu_needed, nu_encountered)
     return res
 
-def satiety(nutrition_needed, nutrition_encountered):
-    if nutrition_encountered == 0:
+def nu_used_fraction(nu_encountered, nu_used):
+    res = nu_used / nu_encountered
+    return res
+
+def satiety(nu_needed, nu_used):
+    if nu_needed == 0:
         res = 1.
     else:
-        res = nutrition_encountered / nutrition_needed
+        res = nu_used / nu_needed
     return res
 
 def birthrate_small_pop_penalty(pop, threshold):
@@ -53,7 +60,7 @@ def birthrate_small_pop_penalty(pop, threshold):
     if threshold == 0:
         res = ones(shape(pop))
     else:
-        res = tanh(2 * pop / threshold)
+        res = tanh(2 * pop / threshold) # TODO extract constant
     return res
 
 
@@ -70,7 +77,7 @@ def birthrate_large_pop_penalty(pop, threshold, decay, floor):
     if threshold == inf:
         res = ones(shape(pop))
     else:
-        res = 0.5 * (1+floor - (1-floor)*tanh(1/decay*(pop - threshold)))
+        res = tanh_decay(threshold, decay, floor)
     return res
 
 
@@ -79,14 +86,15 @@ def birthrate_low_satiety_penalty(satiety, decay=10):
     return res
 
 
-def birthrate(birthrate_max, pop, satiety, 
-              smallpop_threshold, largepop_threshold, largepop_decay, largepop_floor):
+def birthrate(birthrate_max, 
+              satiety, satiety_decay, 
+              pop, smallpop_threshold, largepop_threshold, largepop_decay, largepop_floor):
     '''
-    birthrate for a population under given circumstances of capacity and nutrition
+    birthrate for a population under given circumstances of capacity and nu
     @return birthrate; 0 <= birthrate <= birthrate_max
     '''
     res = birthrate_max * \
-            birthrate_low_satiety_penalty(satiety) * \
+            birthrate_low_satiety_penalty(satiety, satiety_decay) * \
             birthrate_small_pop_penalty(pop, smallpop_threshold) * \
             birthrate_large_pop_penalty(pop, largepop_threshold, largepop_decay, largepop_floor)
     return res
@@ -106,68 +114,69 @@ class Nutrition_Pool:
     '''
     ein Räuber
     0 oder mehr Beute-Species
-    encounters() als Routine?
     autotroph kann auf inf gesetzt werden
     '''
-    def __init__(self, Pred, Prey, encounter_probability, autotroph_encountered_nu=0):
+    def __init__(self, Pred, Prey, encounter_probability, nu_encountered_autotroph=0):
         #
         self.Pred = Pred
         self.Prey = Prey # list
         self.encounter_probability = encounter_probability # list
-        self.autotroph_encountered_nu = autotroph_encountered_nu
+        self.nu_encountered_autotroph = nu_encountered_autotroph
         #
         Pred.set_PreyPool(self)
         for i in range(len(Prey)):
             Prey[i].add_PredPool(self)
 
-    def encountered_nutrition(self):
-        en = 0
+    def nu_encountered(self):
+        tmp = 0
         for i in range(len(self.Prey)):
-            en += self.Prey[i].pop * self.Prey[i].mass * self.encounter_probability[i]
-        en = en * self.Pred.pop
-        res = en + self.autotroph_encountered_nu
-        add_datum(res)
+            tmp += nu_encountered(
+                    self.Prey[i].pop, self.Prey[i].nu,
+                    encounters(self.Pred.pop, self.Prey[i].pop, self.encounter_probability[i]))
+        tmp = tmp + self.nu_encountered_autotroph
+        return tmp
+
+    def nu_used(self):
+        res = nu_used(self.Pred.nu_needed, self.nu_encountered())
+#        logger.debug('np preyed by %s, nu_used: %f, fraction: %f, satiety: %f',
+#                     self.Pred.name, res, res/self.nu_encountered(), self.satiety())
+        return res
+
+    def nu_used_fraction(self):
+        res = nu_used_fraction(self.nu_encountered(), self.nu_used())
         return res
 
     def satiety(self):
-        res = satiety(self.Pred.pop, self.encountered_nutrition(), self.Pred.hunger)
-        return res
-
-    def used_nutrition(self):
-        ''' nutrition units preyed by the predator '''
-        res = self.satiety() * self.Pred.pop * self.Pred.hunger
-        logger.debug('np preyed by %s, used_nutrition: %f, fraction: %f, satiety: %f',
-                     self.Pred.name, res, res/self.encountered_nutrition(), self.satiety())
-        return res
-
-    def used_nutrition_fraction(self):
-        ''' fraction of used nutrition units in comparison to encountered nutrition untis'''
-        res = self.used_nutrition() / self.encountered_nutrition()
+        res = satiety(self.Pred.nu_needed, self.nu_used())
         return res
 
 
 #%%
 class Species:
 
-    def __init__(self, name, pop, mass, hunger, birthrate_max, deathrate_min, smallpop_threshold=0,
-                 largepop_threshold=inf, largepop_decay=0.5, largepop_floor=0.5,
-                 deathrate_decay=1., deathrate_ceil=1.):
+    def __init__(
+            self, name, pop, nu, hunger, 
+            birthrate_max, deathrate_min, 
+            smallpop_threshold=0, largepop_threshold=inf, largepop_decay=0.5, largepop_floor=0.5,
+            deathrate_satiety_decay=3., deathrate_satiety_ceil=5.):
         #
         self.PredPools = [] # list of NutritionPool in which this species acts as prey
         self.PreyPool = None # NutritionPool in which this species acts as predator
         #
-        self.name = name
         self.pop = pop
-        self.mass = mass
+        #
+        self.name = name
+        self.nu = nu
         self.hunger = hunger # set to 0 to remove malnutrition penalty (rem. only for autotrophic)
+        #
         self.birthrate_max = birthrate_max
         self.deathrate_min = deathrate_min
         self.smallpop_threshold = smallpop_threshold # set to 0 to remove smallpop penalty
         self.largepop_threshold = largepop_threshold # set to inf to remove largepop penalty
-        self.largepop_decay = largepop_decay * largepop_threshold
+        self.largepop_decay = largepop_decay * largepop_threshold # TODO das ist unschön
         self.largepop_floor = largepop_floor
-        self.deathrate_decay = deathrate_decay
-        self.deathrate_ceil = deathrate_ceil
+        self.deathrate_satiety_decay = deathrate_satiety_decay
+        self.deathrate_satiety_ceil = deathrate_satiety_ceil
 
     def set_PreyPool(self, PreyPool):
         ''' PROTECTED '''
@@ -179,36 +188,41 @@ class Species:
 
     def set_pop(self, pop):
         self.pop = pop
-
-    def get_nutrition(self):
-        if self.PreyPool:
-            nutrition = self.PreyPool.used_nutrition()
-        else:
-            nutrition = 0
-        return nutrition
+    
+    def satiety(self):
+        res = self.PreyPool.satiety()
+        return res 
 
     def birthrate(self):
-        res = birthrate(self.pop, self.birthrate_max, self.get_nutrition(), self.hunger,
-              self.smallpop_threshold, self.largepop_threshold, self.largepop_decay,
-              self.largepop_floor)
+        res = birthrate(
+                self.birthrate_max, 
+                self.satiety(), self.satiety_decay, 
+                self.pop, self.smallpop_threshold, self.largepop_threshold, self.largepop_decay,
+                self.largepop_floor)
         return res
 
     def deathrate(self):
-        res = deathrate(self.pop, self.deathrate_min, self.get_nutrition(), self.hunger,
-                         self.deathrate_decay, self.deathrate_ceil)
+        res = deathrate(
+                self.deathrate_min, 
+                self.satiety(), self.deathrate_satiety_decay, self.deathrate_satiety_ceil)
         return res
 
     def death_as_prey(self):
         tmp = 0
         for i in range(len(self.PredPools)):
-            tmp = tmp + self.pop * self.PredPools[i].used_nutrition_fraction()
+            tmp = tmp + self.pop * self.PredPools[i].nu_used_fraction()
+            # this can lead to errors if a prey species is preyed by multiplie predators (i.e. has 
+            # more than one object in PredPools). nu_encountered and nu_used_fraction are calcula-
+            # ted and capped per predator. That means that in some cases more prey might be preyed
+            # than actually present. This will not be corrected for predators. However, in order to
+            # rule out death numbers greater than pop, let's test:
         if tmp > self.pop: tmp = self.pop
         return tmp
 
     def growth(self):
         res = (self.birthrate() - self.deathrate()) * self.pop - self.death_as_prey()
-        logger.debug('growth of %s: %f', self.name, res)
-        logger.debug('dap of %s: %f', self.name, self.death_as_prey())
+#        logger.debug('growth of %s: %f', self.name, res)
+#        logger.debug('dap of %s: %f', self.name, self.death_as_prey())
         return res
 
 
