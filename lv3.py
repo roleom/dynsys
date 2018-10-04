@@ -18,12 +18,12 @@ from scipy import integrate
 def logistic(x, L=1, k=1, x0=0):
     return L / (1 + exp(-k * (x-x0) ) )
 
-def exp_decay(start, decay):    
+def exp_decay(x, start, decay):    
     res = (exp(-decay*x+decay)-1) / (exp(decay)-1) * (start-1) + 1
     return res
 
-def tanh_decay(threshold, decay, floor):
-    res = 0.5 * (1+floor - (1-floor)*tanh(1/decay*(pop - threshold)))
+def tanh_decay(x, threshold, decay, floor):
+    res = 0.5 * (1+floor - (1-floor)*tanh(1/decay*(x - threshold)))
     return res
 
 #%%
@@ -77,7 +77,7 @@ def birthrate_large_pop_penalty(pop, threshold, decay, floor):
     if threshold == inf:
         res = ones(shape(pop))
     else:
-        res = tanh_decay(threshold, decay, floor)
+        res = tanh_decay(pop, threshold, decay, floor)
     return res
 
 
@@ -101,7 +101,7 @@ def birthrate(birthrate_max,
 
 
 def deathrate_low_satiety_penalty(satiety, decay=3, ceil=5):
-    res = exp_decay(ceil, decay)
+    res = exp_decay(satiety, ceil, decay)
     return res
 
 
