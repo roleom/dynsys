@@ -155,7 +155,7 @@ class Nutrition_Pool:
 class Species:
 
     def __init__(
-            self, name, pop, nu, hunger, 
+            self, name, pop, nu, nu_needed,
             birthrate_max, deathrate_min, 
             smallpop_threshold=0, largepop_threshold=inf, largepop_decay=0.5, largepop_floor=0.5,
             deathrate_satiety_decay=3., deathrate_satiety_ceil=5.):
@@ -167,7 +167,7 @@ class Species:
         #
         self.name = name
         self.nu = nu
-        self.hunger = hunger # set to 0 to remove malnutrition penalty (rem. only for autotrophic)
+        self.nu_needed = nu_needed # set to 0 to remove malnutrition penalty (rem. only for autotrophic)
         #
         self.birthrate_max = birthrate_max
         self.deathrate_min = deathrate_min
@@ -196,7 +196,7 @@ class Species:
     def birthrate(self):
         res = birthrate(
                 self.birthrate_max, 
-                self.satiety(), self.satiety_decay, 
+                self.satiety(), self.deathrate_satiety_decay, 
                 self.pop, self.smallpop_threshold, self.largepop_threshold, self.largepop_decay,
                 self.largepop_floor)
         return res
@@ -262,16 +262,56 @@ class System:
         return array(tmp)
 
     def set_pop_and_calc_growth(self, pop, t=0):
-#        add_datum(t)
         self.set_pop(pop)
         return self.growth()
 
 #%%
+        
+def build_derivative(X, System, t=0):
+    def tmp(X, t=0):
+        return System.set_pop_and_calc_growth(X, t)
+    return tmp
 
-data = []
-def reset_data():
-    data = []
 
-def add_datum(datum):
-    data.append(datum)
+def finite_sum(delta_X, X0, t):
+    '''
+    calculate series by repeatedly adding delta_X to a starting value X0 scaled by time step size t
+    works analog to integrate.odeint(delta_X, X0, t) in terms of input/output shape
+    @param delta_X function handle of the form f([n_X,],t)->[n_X,]
+    @param X0 value of X at first time value
+    @param t array of time values. Must not be empty
+    '''
+    X = X0
+    out = zeros((size(t), size(X)))
+    out[0] = X
+    delta_t = diff(t)
+    for i in range(len(delta_t)):
+        tmp = delta_X(X, t[i]) * delta_t[i]
+        X = X + tmp
+        out[i+1] = X
+    return out
 
+
+def integrate_system(System, t):
+    '''
+    solve system by integration (interpreting system equations as differential equations)
+    '''
+    X0 = System.get_pop()
+    dX_dt = build_derivative(X0, System)
+    X, infodict = integrate.odeint(dX_dt, X0, t, full_output=True)
+    disp(infodict['message'])
+    return X
+    
+    
+def sum_system(System, t):
+    '''
+    solve system by summation (interpreting system equations as difference equations)
+    times defined by t must start with 0. times should be 1 apart. No stability check'''
+    X0 = System.get_pop()
+    dX_dt = build_derivative(X0, System)
+#    X = 
+    
+    
+    
+    
+    
